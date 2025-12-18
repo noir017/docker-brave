@@ -27,6 +27,10 @@ chown -R root:${GID} /opt/scripts
 chmod -R 750 /opt/scripts
 chown -R ${UID}:${GID} ${DATA_DIR}
 
+echo "---Ensuring BRAVE_DIR exists...---"
+mkdir -p ${BRAVE_DIR}
+chown -R ${UID}:${GID} ${BRAVE_DIR}
+
 echo "---Starting...---"
 term_handler() {
 	kill -SIGTERM "$killpid"
