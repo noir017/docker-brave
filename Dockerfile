@@ -38,7 +38,7 @@ ENV GID=100
 ENV DATA_PERM=770
 ENV USER="user"
 
-RUN mkdir $DATA_DIR && mkdir $BRAVE_DIR && \
+RUN mkdir -p $DATA_DIR && mkdir -p $BRAVE_DIR && \
 	useradd -d $DATA_DIR -s /bin/bash $USER && \
 	chown -R $USER $DATA_DIR && \
 	chown -R $USER $BRAVE_DIR && \
