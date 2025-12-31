@@ -12,7 +12,7 @@ show_usage() {
     echo "  ps -a        列出所有浏览器用户文件夹"
     echo "  ps           列出当前正在运行的浏览器"
     echo "  run <name>   创建新的浏览器配置文件夹"
-    echo "  start <name> 启动指定名称的浏览器"
+    echo "  start <name> [args] 启动指定名称的浏览器"
     echo "  stop <name>  停止指定名称的浏览器"
     echo "  stop all     停止所有正在运行的浏览器"
     echo "  clear <name> 清除指定浏览器的锁定文件"
@@ -23,6 +23,7 @@ show_usage() {
     echo "  $0 ps"
     echo "  $0 run brave3"
     echo "  $0 start brave1"
+    echo "  $0 start brave1 --incognito"
     echo "  $0 stop brave1"
     echo "  $0 stop all"
     echo "  $0 clear brave1"
@@ -31,10 +32,13 @@ show_usage() {
     echo "说明:"
     echo "  浏览器用户文件夹位于: $BRAVE_DATA_DIR"
     echo "  进程信息存储于: $PID_DIR"
+    echo "  start 命令的额外参数会直接传递给 brave-browser"
 }
 
 init_pid_dir() {
     mkdir -p "$PID_DIR"
+    chown user:user "$PID_DIR"
+    chmod 777 "$PID_DIR"
 }
 
 list_all_profiles() {
@@ -133,52 +137,96 @@ stop_browser() {
     
     init_pid_dir
     local pid_file="$PID_DIR/${profile_name}.pid"
+    local profile_path="$BRAVE_DATA_DIR/$profile_name"
     
     if [[ ! -f "$pid_file" ]]; then
-        echo "错误: 未找到浏览器 '$profile_name' 的进程信息"
-        echo "可能未运行或已被停止"
-        return 1
+        echo "警告: 未找到浏览器 '$profile_name' 的进程信息"
+        echo "尝试查找并停止相关进程..."
     fi
     
-    local pid=$(cat "$pid_file" 2>/dev/null)
-    
-    if [[ -z "$pid" ]]; then
-        echo "错误: 无法读取进程ID"
-        rm -f "$pid_file"
-        return 1
+    local main_pid=""
+    if [[ -f "$pid_file" ]]; then
+        main_pid=$(cat "$pid_file" 2>/dev/null)
     fi
     
-    if ! kill -0 "$pid" 2>/dev/null; then
-        echo "进程 $pid 不存在，清理进程文件"
+    echo "正在停止浏览器 '$profile_name'..."
+    
+    local pids_to_kill=()
+    
+    if [[ -n "$main_pid" ]] && kill -0 "$main_pid" 2>/dev/null; then
+        pids_to_kill+=("$main_pid")
+    fi
+    
+    local brave_pids=$(pgrep -f "/opt/brave.com/brave/brave.*--user-data-dir=${profile_path}" 2>/dev/null || true)
+    
+    if [[ -n "$brave_pids" ]]; then
+        while read -r pid; do
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                if [[ ! " ${pids_to_kill[@]} " =~ " ${pid} " ]]; then
+                    pids_to_kill+=("$pid")
+                fi
+            fi
+        done <<< "$brave_pids"
+    fi
+    
+    if [[ ${#pids_to_kill[@]} -eq 0 ]]; then
+        echo "未找到运行中的进程"
         rm -f "$pid_file"
         return 0
     fi
     
-    echo "正在停止浏览器 '$profile_name' (PID: $pid)..."
+    echo "找到 ${#pids_to_kill[@]} 个进程: ${pids_to_kill[*]}"
     
-    kill -TERM "$pid" 2>/dev/null || true
+    for pid in "${pids_to_kill[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
     
     local count=0
-    while kill -0 "$pid" 2>/dev/null && [[ $count -lt 10 ]]; do
+    local remaining=0
+    
+    while [[ $count -lt 10 ]]; do
+        remaining=0
+        for pid in "${pids_to_kill[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                ((remaining++))
+            fi
+        done
+        
+        if [[ $remaining -eq 0 ]]; then
+            break
+        fi
+        
         sleep 1
         ((count++))
     done
     
-    if kill -0 "$pid" 2>/dev/null; then
-        echo "进程未响应，强制终止..."
-        kill -KILL "$pid" 2>/dev/null || true
+    if [[ $remaining -gt 0 ]]; then
+        echo "$remaining 个进程未响应，强制终止..."
+        for pid in "${pids_to_kill[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
         sleep 1
     fi
     
     rm -f "$pid_file"
     
-    if kill -0 "$pid" 2>/dev/null; then
-        echo "错误: 无法停止进程 $pid"
+    local still_running=0
+    for pid in "${pids_to_kill[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            ((still_running++))
+        fi
+    done
+    
+    if [[ $still_running -gt 0 ]]; then
+        echo "警告: 仍有 $still_running 个进程无法停止"
         return 1
     else
         echo "✅ 浏览器 '$profile_name' 已停止"
         
-        local profile_path="$BRAVE_DATA_DIR/$profile_name"
         if [[ -d "$profile_path" ]]; then
             echo "清理锁定文件..."
             /opt/scripts/fix_brave_lock.sh "$profile_path" 2>/dev/null || true
@@ -190,10 +238,11 @@ stop_browser() {
 
 start_browser() {
     local profile_name="$1"
+    shift
     
     if [[ -z "$profile_name" ]]; then
         echo "错误: 请指定要启动的浏览器名称"
-        echo "用法: $0 start <name>"
+        echo "用法: $0 start <name> [extra-args...]"
         return 1
     fi
     
@@ -208,12 +257,10 @@ start_browser() {
     init_pid_dir
     
     if is_running "$profile_name"; then
-        echo "错误: 浏览器 '$profile_name' 已经在运行"
-        echo "使用 '$0 ps' 查看运行状态"
-        return 1
+        echo "浏览器 '$profile_name' 已在运行，正在打开新标签页..."
+    else
+        echo "正在启动浏览器 '$profile_name'..."
     fi
-    
-    echo "正在启动浏览器 '$profile_name'..."
     echo "用户数据目录: $profile_path"
     
     local pid_file="$PID_DIR/${profile_name}.pid"
@@ -226,29 +273,40 @@ start_browser() {
     export CUSTOM_RES_H=${CUSTOM_RES_H:-768}
     export EXTRA_PARAMETERS=${EXTRA_PARAMETERS:-}
     
+    local extra_args="$@"
+    
+    if [[ -n "$extra_args" ]]; then
+        echo "额外参数: $extra_args"
+    fi
+    
     su -p user -c "
 cd ${BRAVE_DIR}
-brave-browser --user-data-dir=${BRAVE_DIR} --disable-accelerated-video --disable-gpu --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H} --no-sandbox --test-type --dbus-stub ${EXTRA_PARAMETERS} > /dev/null 2>&1 &
-echo \$! > ${pid_file}
+brave-browser --user-data-dir=${BRAVE_DIR} --disable-accelerated-video --disable-gpu --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H} --no-sandbox --test-type --dbus-stub ${EXTRA_PARAMETERS} ${extra_args} > /dev/null 2>&1 &
 "
     
-    sleep 2
+    if is_running "$profile_name"; then
+        echo "✅ 已在浏览器 '$profile_name' 中打开新标签页"
+        return 0
+    fi
     
-    if [[ -f "$pid_file" ]]; then
-        local pid=$(cat "$pid_file" 2>/dev/null)
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-            echo "✅ 浏览器 '$profile_name' 已启动 (PID: $pid)"
-            echo "可以通过 noVNC 访问: http://localhost:${NOVNC_PORT:-8080}"
-            return 0
-        else
-            echo "错误: 浏览器启动失败"
-            rm -f "$pid_file"
-            return 1
-        fi
-    else
-        echo "错误: 无法获取进程ID"
+    sleep 3
+    
+    local brave_pid=$(pgrep -f "/opt/brave.com/brave/brave.*--user-data-dir=${profile_path}" | head -n 1)
+    
+    if [[ -z "$brave_pid" ]]; then
+        echo "错误: 浏览器启动失败，未找到进程"
         return 1
     fi
+    
+    if ! kill -0 "$brave_pid" 2>/dev/null; then
+        echo "错误: 进程 $brave_pid 已退出"
+        return 1
+    fi
+    
+    echo "$brave_pid" > "$pid_file"
+    
+    echo "✅ 浏览器 '$profile_name' 已启动 (PID: $brave_pid)"
+    return 0
 }
 
 create_browser() {
@@ -415,7 +473,7 @@ main() {
             create_browser "$1"
             ;;
         start)
-            start_browser "$1"
+            start_browser "$@"
             ;;
         stop)
             if [[ "$1" == "all" ]]; then

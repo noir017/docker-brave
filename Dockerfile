@@ -11,17 +11,17 @@ RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://br
 	echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg arch=amd64] https://brave-browser-apt-release.s3.brave.com/ stable main" | tee /etc/apt/sources.list.d/brave-browser-release.list
 
 RUN apt-get update && \
-	apt-get -y install --no-install-recommends brave-browser fonts-takao fonts-arphic-uming libgtk-3-0
+	apt-get -y install --no-install-recommends brave-browser fonts-noto-cjk libgtk-3-0
 
-RUN export TZ=Europe/Rome && \
+RUN export TZ=Asia/Shanghai && \
 	ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 	echo $TZ > /etc/timezone && \
-	echo "ko_KR.UTF-8 UTF-8" >> /etc/locale.gen && \ 
-	echo "ja_JP.UTF-8 UTF-8" >> /etc/locale.gen && \
+	echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen && \
+	echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen && \
 	locale-gen && \
 	rm -rf /var/lib/apt/lists/*
 
-RUN sed -i '/    document.title =/c\    document.title = "Brave - noVNC";' /usr/share/novnc/app/ui.js && \
+RUN sed -i '/    document.title =/c\    document.title = "Brave浏览器 - noVNC";' /usr/share/novnc/app/ui.js && \
 	rm /usr/share/novnc/app/images/icons/*
 
 # 安装必须软件
