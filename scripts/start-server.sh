@@ -2,6 +2,11 @@
 export DISPLAY=:99
 export XAUTHORITY=${DATA_DIR}/.Xauthority
 
+# Use passed BRAVE_DIR if provided, otherwise use environment variable
+if [ -n "$1" ]; then
+    export BRAVE_DIR="$1"
+fi
+
 echo "---Resolution check---"
 if [ -z "${CUSTOM_RES_W}" ]; then
 	CUSTOM_RES_W=1024
@@ -41,6 +46,5 @@ echo "---Starting noVNC server---"
 websockify -D --web=/usr/share/novnc/ --cert=/etc/ssl/novnc.pem ${NOVNC_PORT} localhost:${RFB_PORT}
 sleep 2
 
-echo "---Starting Brave---"
-cd ${BRAVE_DIR}
-brave-browser --user-data-dir=${BRAVE_DIR} --disable-accelerated-video --disable-gpu --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H} --no-sandbox --test-type --dbus-stub ${EXTRA_PARAMETERS} 2>/dev/null
+# echo "---Starting Brave---"
+# cd ${BRAVE_DIR}
