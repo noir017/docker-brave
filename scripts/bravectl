@@ -177,12 +177,14 @@ stop_browser() {
     
     echo "找到 ${#pids_to_kill[@]} 个进程: ${pids_to_kill[*]}"
     
+    echo "正在发送 SIGTERM 信号..."
     for pid in "${pids_to_kill[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
-    done
+    done || true
     
+    echo "等待进程退出..."
     local count=0
     local remaining=0
     
@@ -190,17 +192,19 @@ stop_browser() {
         remaining=0
         for pid in "${pids_to_kill[@]}"; do
             if kill -0 "$pid" 2>/dev/null; then
-                ((remaining++))
+                ((remaining++)) || true
             fi
-        done
+        done || true
         
         if [[ $remaining -eq 0 ]]; then
             break
         fi
         
         sleep 1
-        ((count++))
-    done
+        ((count++)) || true
+    done || true
+    
+    echo "等待完成，剩余 $remaining 个进程"
     
     if [[ $remaining -gt 0 ]]; then
         echo "$remaining 个进程未响应，强制终止..."
@@ -208,18 +212,20 @@ stop_browser() {
             if kill -0 "$pid" 2>/dev/null; then
                 kill -KILL "$pid" 2>/dev/null || true
             fi
-        done
+        done || true
         sleep 1
-    fi
+    fi || true
     
-    rm -f "$pid_file"
+    echo "清理 PID 文件..."
+    rm -f "$pid_file" || true
     
+    echo "检查进程状态..."
     local still_running=0
     for pid in "${pids_to_kill[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            ((still_running++))
+            ((still_running++)) || true
         fi
-    done
+    done || true
     
     if [[ $still_running -gt 0 ]]; then
         echo "警告: 仍有 $still_running 个进程无法停止"
@@ -228,8 +234,11 @@ stop_browser() {
         echo "✅ 浏览器 '$profile_name' 已停止"
         
         if [[ -d "$profile_path" ]]; then
-            echo "清理锁定文件..."
-            /opt/scripts/fix_brave_lock.sh "$profile_path" 2>/dev/null || true
+            # echo "清理锁定文件..."
+            # /opt/scripts/fix_brave_lock.sh "$profile_path" 2>/dev/null || true
+            
+            echo "清理会话恢复文件..."
+            rm -rf "$profile_path/Default/Sessions" 2>/dev/null || true
         fi
         
         return 0
@@ -463,30 +472,30 @@ main() {
     
     case "$command" in
         ps)
-            if [[ "$1" == "-a" ]]; then
+            if [[ "${1:-}" == "-a" ]]; then
                 list_all_profiles
             else
                 list_running_profiles
             fi
             ;;
         run)
-            create_browser "$1"
+            create_browser "${1:-}"
             ;;
         start)
             start_browser "$@"
             ;;
         stop)
-            if [[ "$1" == "all" ]]; then
+            if [[ "${1:-}" == "all" ]]; then
                 stop_all_browsers
             else
-                stop_browser "$1"
+                stop_browser "${1:-}"
             fi
             ;;
         clear)
-            if [[ "$1" == "all" ]]; then
+            if [[ "${1:-}" == "all" ]]; then
                 clear_all_locks
             else
-                clear_lock "$1"
+                clear_lock "${1:-}"
             fi
             ;;
         -h|--help|help)
