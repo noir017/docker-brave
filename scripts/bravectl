@@ -1,0 +1,446 @@
+#!/bin/bash
+
+set -euo pipefail
+
+BRAVE_DATA_DIR="/user/braveData"
+PID_DIR="/tmp/brave_pids"
+
+show_usage() {
+    echo "用法: $0 <command> [options]"
+    echo ""
+    echo "命令:"
+    echo "  ps -a        列出所有浏览器用户文件夹"
+    echo "  ps           列出当前正在运行的浏览器"
+    echo "  run <name>   创建新的浏览器配置文件夹"
+    echo "  start <name> 启动指定名称的浏览器"
+    echo "  stop <name>  停止指定名称的浏览器"
+    echo "  stop all     停止所有正在运行的浏览器"
+    echo "  clear <name> 清除指定浏览器的锁定文件"
+    echo "  clear all    清除所有浏览器的锁定文件"
+    echo ""
+    echo "示例:"
+    echo "  $0 ps -a"
+    echo "  $0 ps"
+    echo "  $0 run brave3"
+    echo "  $0 start brave1"
+    echo "  $0 stop brave1"
+    echo "  $0 stop all"
+    echo "  $0 clear brave1"
+    echo "  $0 clear all"
+    echo ""
+    echo "说明:"
+    echo "  浏览器用户文件夹位于: $BRAVE_DATA_DIR"
+    echo "  进程信息存储于: $PID_DIR"
+}
+
+init_pid_dir() {
+    mkdir -p "$PID_DIR"
+}
+
+list_all_profiles() {
+    echo "所有浏览器用户文件夹:"
+    echo "========================"
+    
+    if [[ ! -d "$BRAVE_DATA_DIR" ]]; then
+        echo "错误: 目录不存在: $BRAVE_DATA_DIR"
+        return 1
+    fi
+    
+    local profiles=($(ls -1 "$BRAVE_DATA_DIR" 2>/dev/null | sort))
+    
+    if [[ ${#profiles[@]} -eq 0 ]]; then
+        echo "未找到任何浏览器用户文件夹"
+        return 0
+    fi
+    
+    printf "%-20s %-30s %-10s\n" "名称" "路径" "状态"
+    printf "%-20s %-30s %-10s\n" "----" "----" "----"
+    
+    for profile in "${profiles[@]}"; do
+        local profile_path="$BRAVE_DATA_DIR/$profile"
+        local status="已停止"
+        
+        if is_running "$profile"; then
+            status="运行中"
+        fi
+        
+        printf "%-20s %-30s %-10s\n" "$profile" "$profile_path" "$status"
+    done
+    
+    echo ""
+    echo "总计: ${#profiles[@]} 个用户文件夹"
+}
+
+list_running_profiles() {
+    echo "当前正在运行的浏览器:"
+    echo "========================"
+    
+    init_pid_dir
+    
+    local running_profiles=()
+    
+    if [[ ! -d "$PID_DIR" ]]; then
+        echo "未找到进程信息目录"
+        return 0
+    fi
+    
+    for pid_file in "$PID_DIR"/*.pid; do
+        if [[ -f "$pid_file" ]]; then
+            local profile_name=$(basename "$pid_file" .pid)
+            local pid=$(cat "$pid_file" 2>/dev/null)
+            
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+                local profile_path="$BRAVE_DATA_DIR/$profile_name"
+                local start_time=$(ps -o lstart= -p "$pid" 2>/dev/null || echo "未知")
+                
+                running_profiles+=("$profile_name")
+                printf "%-20s %-30s %-10s %-20s\n" "$profile_name" "$profile_path" "PID: $pid" "$start_time"
+            else
+                rm -f "$pid_file"
+            fi
+        fi
+    done
+    
+    if [[ ${#running_profiles[@]} -eq 0 ]]; then
+        echo "没有正在运行的浏览器"
+    else
+        echo ""
+        echo "总计: ${#running_profiles[@]} 个正在运行的浏览器"
+    fi
+}
+
+is_running() {
+    local profile_name="$1"
+    local pid_file="$PID_DIR/${profile_name}.pid"
+    
+    if [[ -f "$pid_file" ]]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+stop_browser() {
+    local profile_name="$1"
+    
+    if [[ -z "$profile_name" ]]; then
+        echo "错误: 请指定要停止的浏览器名称"
+        echo "用法: $0 stop <name>"
+        return 1
+    fi
+    
+    init_pid_dir
+    local pid_file="$PID_DIR/${profile_name}.pid"
+    
+    if [[ ! -f "$pid_file" ]]; then
+        echo "错误: 未找到浏览器 '$profile_name' 的进程信息"
+        echo "可能未运行或已被停止"
+        return 1
+    fi
+    
+    local pid=$(cat "$pid_file" 2>/dev/null)
+    
+    if [[ -z "$pid" ]]; then
+        echo "错误: 无法读取进程ID"
+        rm -f "$pid_file"
+        return 1
+    fi
+    
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "进程 $pid 不存在，清理进程文件"
+        rm -f "$pid_file"
+        return 0
+    fi
+    
+    echo "正在停止浏览器 '$profile_name' (PID: $pid)..."
+    
+    kill -TERM "$pid" 2>/dev/null || true
+    
+    local count=0
+    while kill -0 "$pid" 2>/dev/null && [[ $count -lt 10 ]]; do
+        sleep 1
+        ((count++))
+    done
+    
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "进程未响应，强制终止..."
+        kill -KILL "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+    
+    rm -f "$pid_file"
+    
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "错误: 无法停止进程 $pid"
+        return 1
+    else
+        echo "✅ 浏览器 '$profile_name' 已停止"
+        
+        local profile_path="$BRAVE_DATA_DIR/$profile_name"
+        if [[ -d "$profile_path" ]]; then
+            echo "清理锁定文件..."
+            /opt/scripts/fix_brave_lock.sh "$profile_path" 2>/dev/null || true
+        fi
+        
+        return 0
+    fi
+}
+
+start_browser() {
+    local profile_name="$1"
+    
+    if [[ -z "$profile_name" ]]; then
+        echo "错误: 请指定要启动的浏览器名称"
+        echo "用法: $0 start <name>"
+        return 1
+    fi
+    
+    local profile_path="$BRAVE_DATA_DIR/$profile_name"
+    
+    if [[ ! -d "$profile_path" ]]; then
+        echo "错误: 浏览器用户文件夹不存在: $profile_path"
+        echo "请先使用 '$0 run $profile_name' 创建该文件夹"
+        return 1
+    fi
+    
+    init_pid_dir
+    
+    if is_running "$profile_name"; then
+        echo "错误: 浏览器 '$profile_name' 已经在运行"
+        echo "使用 '$0 ps' 查看运行状态"
+        return 1
+    fi
+    
+    echo "正在启动浏览器 '$profile_name'..."
+    echo "用户数据目录: $profile_path"
+    
+    local pid_file="$PID_DIR/${profile_name}.pid"
+    
+    export DISPLAY=:99
+    export XAUTHORITY=/user/.Xauthority
+    export BRAVE_DIR="$profile_path"
+    
+    export CUSTOM_RES_W=${CUSTOM_RES_W:-1024}
+    export CUSTOM_RES_H=${CUSTOM_RES_H:-768}
+    export EXTRA_PARAMETERS=${EXTRA_PARAMETERS:-}
+    
+    su -p user -c "
+cd ${BRAVE_DIR}
+brave-browser --user-data-dir=${BRAVE_DIR} --disable-accelerated-video --disable-gpu --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H} --no-sandbox --test-type --dbus-stub ${EXTRA_PARAMETERS} > /dev/null 2>&1 &
+echo \$! > ${pid_file}
+"
+    
+    sleep 2
+    
+    if [[ -f "$pid_file" ]]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "✅ 浏览器 '$profile_name' 已启动 (PID: $pid)"
+            echo "可以通过 noVNC 访问: http://localhost:${NOVNC_PORT:-8080}"
+            return 0
+        else
+            echo "错误: 浏览器启动失败"
+            rm -f "$pid_file"
+            return 1
+        fi
+    else
+        echo "错误: 无法获取进程ID"
+        return 1
+    fi
+}
+
+create_browser() {
+    local profile_name="$1"
+    
+    if [[ -z "$profile_name" ]]; then
+        echo "错误: 请指定要创建的浏览器名称"
+        echo "用法: $0 run <name>"
+        return 1
+    fi
+    
+    local profile_path="$BRAVE_DATA_DIR/$profile_name"
+    
+    if [[ -d "$profile_path" ]]; then
+        echo "错误: 浏览器用户文件夹已存在: $profile_path"
+        echo "如需重新创建，请先删除该文件夹"
+        return 1
+    fi
+    
+    echo "正在创建新的浏览器配置文件夹: $profile_name"
+    echo "路径: $profile_path"
+    
+    mkdir -p "$profile_path"
+    chown -R user:user "$profile_path"
+    
+    echo "✅ 浏览器配置文件夹已创建"
+    echo "现在可以使用 '$0 start $profile_name' 启动浏览器"
+}
+
+stop_all_browsers() {
+    echo "正在停止所有正在运行的浏览器..."
+    
+    init_pid_dir
+    
+    local stopped_count=0
+    local failed_count=0
+    
+    if [[ ! -d "$PID_DIR" ]]; then
+        echo "未找到进程信息目录"
+        return 0
+    fi
+    
+    for pid_file in "$PID_DIR"/*.pid; do
+        if [[ -f "$pid_file" ]]; then
+            local profile_name=$(basename "$pid_file" .pid)
+            
+            if stop_browser "$profile_name"; then
+                ((stopped_count++))
+            else
+                ((failed_count++))
+            fi
+        fi
+    done
+    
+    echo ""
+    echo "停止完成: 成功 $stopped_count 个, 失败 $failed_count 个"
+}
+
+clear_lock() {
+    local profile_name="$1"
+    
+    if [[ -z "$profile_name" ]]; then
+        echo "错误: 请指定要清除锁定文件的浏览器名称"
+        echo "用法: $0 clear <name>"
+        return 1
+    fi
+    
+    local profile_path="$BRAVE_DATA_DIR/$profile_name"
+    
+    if [[ ! -d "$profile_path" ]]; then
+        echo "错误: 浏览器用户文件夹不存在: $profile_path"
+        return 1
+    fi
+    
+    if is_running "$profile_name"; then
+        echo "警告: 浏览器 '$profile_name' 正在运行"
+        echo "建议先停止浏览器再清除锁定文件"
+        echo "继续操作可能导致数据损坏"
+        read -p "是否继续? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "操作已取消"
+            return 0
+        fi
+    fi
+    
+    echo "正在清除 '$profile_name' 的锁定文件..."
+    /opt/scripts/fix_brave_lock.sh "$profile_path"
+    
+    echo "✅ 锁定文件清除完成"
+}
+
+clear_all_locks() {
+    echo "正在清除所有浏览器的锁定文件..."
+    
+    if [[ ! -d "$BRAVE_DATA_DIR" ]]; then
+        echo "错误: 目录不存在: $BRAVE_DATA_DIR"
+        return 1
+    fi
+    
+    local profiles=($(ls -1 "$BRAVE_DATA_DIR" 2>/dev/null | sort))
+    
+    if [[ ${#profiles[@]} -eq 0 ]]; then
+        echo "未找到任何浏览器用户文件夹"
+        return 0
+    fi
+    
+    local running_profiles=()
+    for profile in "${profiles[@]}"; do
+        if is_running "$profile"; then
+            running_profiles+=("$profile")
+        fi
+    done
+    
+    if [[ ${#running_profiles[@]} -gt 0 ]]; then
+        echo "警告: 以下浏览器正在运行:"
+        for profile in "${running_profiles[@]}"; do
+            echo "  - $profile"
+        done
+        echo ""
+        echo "建议先停止这些浏览器再清除锁定文件"
+        echo "继续操作可能导致数据损坏"
+        read -p "是否继续? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "操作已取消"
+            return 0
+        fi
+    fi
+    
+    local success_count=0
+    local failed_count=0
+    
+    for profile in "${profiles[@]}"; do
+        echo ""
+        echo "处理: $profile"
+        if /opt/scripts/fix_brave_lock.sh "$BRAVE_DATA_DIR/$profile" > /dev/null 2>&1; then
+            ((success_count++))
+        else
+            ((failed_count++))
+        fi
+    done
+    
+    echo ""
+    echo "清除完成: 成功 $success_count 个, 失败 $failed_count 个"
+}
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        show_usage
+        exit 1
+    fi
+    
+    local command="$1"
+    shift || true
+    
+    case "$command" in
+        ps)
+            if [[ "$1" == "-a" ]]; then
+                list_all_profiles
+            else
+                list_running_profiles
+            fi
+            ;;
+        run)
+            create_browser "$1"
+            ;;
+        start)
+            start_browser "$1"
+            ;;
+        stop)
+            if [[ "$1" == "all" ]]; then
+                stop_all_browsers
+            else
+                stop_browser "$1"
+            fi
+            ;;
+        clear)
+            if [[ "$1" == "all" ]]; then
+                clear_all_locks
+            else
+                clear_lock "$1"
+            fi
+            ;;
+        -h|--help|help)
+            show_usage
+            ;;
+        *)
+            echo "错误: 未知命令 '$command'"
+            echo ""
+            show_usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

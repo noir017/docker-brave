@@ -43,6 +43,7 @@ ENV UID=99
 ENV GID=100
 ENV DATA_PERM=770
 ENV USER="user"
+ENV PATH="/opt/scripts:${PATH}"
 
 RUN mkdir -p $DATA_DIR && mkdir -p $BRAVE_DIR && \
 	useradd -d $DATA_DIR -s /bin/bash $USER && \
