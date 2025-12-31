@@ -282,15 +282,20 @@ start_browser() {
     export CUSTOM_RES_H=${CUSTOM_RES_H:-768}
     export EXTRA_PARAMETERS=${EXTRA_PARAMETERS:-}
     
-    local extra_args="$@"
+    local extra_args=("$@")
     
-    if [[ -n "$extra_args" ]]; then
-        echo "额外参数: $extra_args"
+    if [[ ${#extra_args[@]} -gt 0 ]]; then
+        echo "额外参数: ${extra_args[*]}"
     fi
+    
+    local cmd_args=""
+    for arg in "${extra_args[@]}"; do
+        cmd_args="$cmd_args $(printf '%q' "$arg")"
+    done
     
     su -p user -c "
 cd ${BRAVE_DIR}
-brave-browser --user-data-dir=${BRAVE_DIR} --disable-accelerated-video --disable-gpu --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H} --no-sandbox --test-type --dbus-stub ${EXTRA_PARAMETERS} ${extra_args} > /dev/null 2>&1 &
+brave-browser --user-data-dir=${BRAVE_DIR} --window-size=${CUSTOM_RES_W},${CUSTOM_RES_H}  ${EXTRA_PARAMETERS} ${cmd_args} > /dev/null 2>&1 &
 "
     
     if is_running "$profile_name"; then
