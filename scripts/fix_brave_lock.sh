@@ -130,22 +130,6 @@ main() {
         echo ""
         show_usage
         
-        # 尝试使用默认路径
-        local default_dir="$HOME/.config/BraveSoftware/Brave-Browser"
-        echo ""
-        echo "尝试使用默认路径: $default_dir"
-        
-        if [[ -d "$default_dir" ]]; then
-            read -p "是否使用此默认路径? (y/n): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                brave_dir="$default_dir"
-            else
-                exit 1
-            fi
-        else
-            exit 1
-        fi
     fi
     
     # 展开路径中的波浪号
@@ -164,13 +148,6 @@ main() {
     echo ""
     echo "⚠️  警告: 将清理Brave配置文件目录: $brave_dir"
     echo "这可能会重置某些浏览器设置"
-    read -p "是否继续? (y/n): " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "操作已取消"
-        exit 0
-    fi
     
     # 执行清理
     clean_brave_profile "$brave_dir"

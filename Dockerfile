@@ -50,16 +50,11 @@ RUN mkdir -p $DATA_DIR && mkdir -p $BRAVE_DIR && \
 	chown -R $USER $BRAVE_DIR && \
 	ulimit -n 2048
 
-RUN echo "11111"
+RUN echo "111111"
 
 ADD /scripts/ /opt/scripts/
 COPY /icons/* /usr/share/novnc/app/images/icons/
 COPY /conf/ /etc/.fluxbox/
-
-
-
-
-
 
 RUN chmod -R 770 /opt/scripts/
 
