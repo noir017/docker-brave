@@ -39,6 +39,5 @@ su ${USER} -c "/opt/scripts/start-server.sh" &
 killpid="$!"
 while true
 do
-	wait $killpid
-	exit 0;
+	sleep 10
 done
