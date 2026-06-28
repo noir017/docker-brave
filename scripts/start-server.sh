@@ -36,9 +36,21 @@ if [ -f ${DATA_DIR}/.vnc/passwd ]; then
 fi
 screen -wipe 2&>/dev/null
 
-echo "---Starting TurboVNC server---"
-vncserver -geometry ${CUSTOM_RES_W}x${CUSTOM_RES_H} -depth ${CUSTOM_DEPTH} :99 -rfbport ${RFB_PORT} -noxstartup -noserverkeymap ${TURBOVNC_PARAMS} 2>/dev/null
-sleep 2
+# 按镜像内可用的 VNC 工具自动选择启动方式：
+#   - amd64 基础镜像自带 TurboVNC（vncserver）
+#   - arm64 基础镜像改用 Xvfb + x11vnc
+if command -v vncserver >/dev/null 2>&1; then
+	echo "---Starting TurboVNC server---"
+	vncserver -geometry ${CUSTOM_RES_W}x${CUSTOM_RES_H} -depth ${CUSTOM_DEPTH} :99 -rfbport ${RFB_PORT} -noxstartup -noserverkeymap ${TURBOVNC_PARAMS} 2>/dev/null
+	sleep 2
+else
+	echo "---Starting Xvfb server---"
+	screen -S Xvfb -L -Logfile ${DATA_DIR}/XvfbLog.0 -d -m /opt/scripts/start-Xvfb.sh
+	sleep 2
+	echo "---Starting x11vnc server---"
+	screen -S x11vnc -L -Logfile ${DATA_DIR}/x11vncLog.0 -d -m /opt/scripts/start-x11.sh
+	sleep 2
+fi
 echo "---Starting Fluxbox---"
 screen -d -m env HOME=/etc /usr/bin/fluxbox
 sleep 2
