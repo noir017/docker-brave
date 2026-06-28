@@ -11,7 +11,8 @@ show_usage() {
     echo "命令:"
     echo "  ps -a        列出所有浏览器用户文件夹"
     echo "  ps           列出当前正在运行的浏览器"
-    echo "  run <name>   创建新的浏览器配置文件夹"
+    echo "  new <name>   创建新的浏览器配置文件夹"
+    echo "  duplicate <src> <name> 复制指定文件夹为新的配置文件夹"
     echo "  start <name> [args] 启动指定名称的浏览器"
     echo "  stop <name>  停止指定名称的浏览器"
     echo "  stop all     停止所有正在运行的浏览器"
@@ -21,7 +22,8 @@ show_usage() {
     echo "示例:"
     echo "  $0 ps -a"
     echo "  $0 ps"
-    echo "  $0 run brave3"
+    echo "  $0 new brave3"
+    echo "  $0 duplicate brave1 brave3"
     echo "  $0 start brave1"
     echo "  $0 start brave1 --incognito"
     echo "  $0 stop brave1"
@@ -259,7 +261,7 @@ start_browser() {
     
     if [[ ! -d "$profile_path" ]]; then
         echo "错误: 浏览器用户文件夹不存在: $profile_path"
-        echo "请先使用 '$0 run $profile_name' 创建该文件夹"
+        echo "请先使用 '$0 new $profile_name' 创建该文件夹"
         return 1
     fi
     
@@ -328,12 +330,12 @@ create_browser() {
     
     if [[ -z "$profile_name" ]]; then
         echo "错误: 请指定要创建的浏览器名称"
-        echo "用法: $0 run <name>"
+        echo "用法: $0 new <name>"
         return 1
     fi
-    
+
     local profile_path="$BRAVE_DATA_DIR/$profile_name"
-    
+
     if [[ -d "$profile_path" ]]; then
         echo "错误: 浏览器用户文件夹已存在: $profile_path"
         echo "如需重新创建，请先删除该文件夹"
@@ -348,6 +350,55 @@ create_browser() {
     
     echo "✅ 浏览器配置文件夹已创建"
     echo "现在可以使用 '$0 start $profile_name' 启动浏览器"
+}
+
+duplicate_browser() {
+    local src_name="$1"
+    local dest_name="$2"
+
+    if [[ -z "$src_name" || -z "$dest_name" ]]; then
+        echo "错误: 请指定源文件夹和新文件夹名称"
+        echo "用法: $0 duplicate <src> <name>"
+        return 1
+    fi
+
+    local src_path="$BRAVE_DATA_DIR/$src_name"
+    local dest_path="$BRAVE_DATA_DIR/$dest_name"
+
+    if [[ ! -d "$src_path" ]]; then
+        echo "错误: 源浏览器用户文件夹不存在: $src_path"
+        return 1
+    fi
+
+    if [[ -d "$dest_path" ]]; then
+        echo "错误: 目标浏览器用户文件夹已存在: $dest_path"
+        echo "如需重新创建，请先删除该文件夹"
+        return 1
+    fi
+
+    if is_running "$src_name"; then
+        echo "警告: 源浏览器 '$src_name' 正在运行"
+        echo "建议先停止浏览器再复制，以免复制到不一致的数据"
+        read -p "是否继续? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "操作已取消"
+            return 0
+        fi
+    fi
+
+    echo "正在复制浏览器配置文件夹: $src_name -> $dest_name"
+    echo "源路径: $src_path"
+    echo "目标路径: $dest_path"
+
+    cp -a "$src_path" "$dest_path"
+    chown -R user:user "$dest_path"
+
+    echo "清理会话恢复与锁定文件..."
+    rm -rf "$dest_path/Default/Sessions" 2>/dev/null || true
+    rm -f "$dest_path/SingletonLock" "$dest_path/SingletonCookie" "$dest_path/SingletonSocket" 2>/dev/null || true
+
+    echo "✅ 浏览器配置文件夹已复制"
+    echo "现在可以使用 '$0 start $dest_name' 启动浏览器"
 }
 
 stop_all_browsers() {
@@ -483,8 +534,11 @@ main() {
                 list_running_profiles
             fi
             ;;
-        run)
+        new)
             create_browser "${1:-}"
+            ;;
+        duplicate)
+            duplicate_browser "${1:-}" "${2:-}"
             ;;
         start)
             start_browser "$@"
